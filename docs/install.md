@@ -36,6 +36,8 @@ irm https://github.com/koyzdev/ReClassNetMcp/releases/latest/download/install.ps
 | `-ReadOnly` | `switch` | off | Writes `allowMutations: false`, which makes the server refuse every mutating tool and hide it from `tools/list`. Omitting it changes nothing; it never forces mutations back on for an existing install. |
 | `-NoSkill` | `switch` | off | Skips installing the `reclass` skill into `%USERPROFILE%\.omp\agent\skills\reclass\`. |
 | `-ArchivePath` | `string` | none | Installs from a local `ReClassNetMcp-<version>.zip` instead of downloading one. Nothing touches the network, and `-Repo`/`-Version` are ignored. |
+| `-Search` | `switch` | off | Also look for `ReClass.NET.exe` on every fixed drive. Slower, and the usual answer when the install lives somewhere unconventional. |
+| `-NonInteractive` | `switch` | off | Never prompt. Discovery failures and multiple matches are reported instead of asked about, which is what you want in a script. |
 | `-Uninstall` | `switch` | off | Removes the plugin, the client entries and the skill instead of installing them. |
 | `-Force` | `switch` | off | On install, closes running ReClass.NET instances instead of only warning about the locked DLL. With `-Uninstall`, also deletes `%LOCALAPPDATA%\ReClass.NET\mcp\`, token and instance files included. |
 | `-LoadOnly` | `switch` | off | Defines the functions and returns without touching anything. The install tests dot-source the script this way to exercise the config writers in isolation. |
@@ -198,6 +200,23 @@ entry from every known client config regardless of `-Clients`, and removes
 the same token and every client config stays valid. Add `-Force` to delete that directory,
 token and instance files included. Then the next install generates a new token and every client
 entry must be rewritten.
+
+## Where ReClass.NET is looked for
+
+The installer works through these in order and takes the union of whatever it finds:
+
+1. `-ReClassPath`, which accepts either the folder or the `ReClass.NET.exe` path itself.
+2. A running `ReClass.NET` process, read from its main module path.
+3. Paths remembered from a previous install, stored as `reclassPaths` in `server.json`.
+4. Windows shell history (`MuiCache`), which records the full path of anything launched from Explorer, wherever it lives.
+5. A depth 3 scan of the usual roots: `%LOCALAPPDATA%\Programs`, both `Program Files`, Desktop, Downloads, Documents, `%USERPROFILE%\Tools`, `%USERPROFILE%\source\repos`, `C:\Tools` and `C:\ReClass.NET`.
+6. With `-Search`, a depth 5 scan of every fixed drive, skipping `Windows`, `ProgramData`, `AppData`, recycle bins and `node_modules`.
+
+Build intermediates are ignored, so an `obj` directory holding a stray copy of the exe is never offered as a target.
+
+If none of that finds it, an interactive run asks for the path and offers to search every drive. A non-interactive run fails with a message naming both `-ReClassPath` and `-Search`. When more than one installation is found, an interactive run lists them and lets you pick by number; press enter to install into all of them. A non-interactive run installs into all of them.
+
+Because the resolved paths are written back to `server.json`, an unconventional location only has to be found once. Later upgrades need no arguments.
 
 ## Troubleshooting
 

@@ -20,6 +20,10 @@ param(
 
     [string]$ArchivePath,
 
+    [switch]$Search,
+
+    [switch]$NonInteractive,
+
     [switch]$Uninstall,
 
     [switch]$Force,
@@ -599,40 +603,125 @@ function Get-ClientTargets
     return @($selected)
 }
 
-function Resolve-ReClassNetDirectory
+function Select-ReClassDirectory
 {
-    param([string]$Hint)
+    param([string[]]$Candidates)
 
-    if ($Hint)
+    $result = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($candidate in $Candidates)
     {
-        $resolved = (Resolve-Path -LiteralPath $Hint -ErrorAction Stop).Path
-
-        if ((Get-Item -LiteralPath $resolved).PSIsContainer)
+        if (-not $candidate)
         {
-            $candidate = Join-Path $resolved 'ReClass.NET.exe'
-            if (-not (Test-Path -LiteralPath $candidate))
+            continue
+        }
+
+        try
+        {
+            $directory = $candidate
+
+            if ($candidate.EndsWith('.exe', [StringComparison]::OrdinalIgnoreCase))
             {
-                throw "'$resolved' does not contain ReClass.NET.exe."
+                $directory = [System.IO.Path]::GetDirectoryName($candidate)
             }
 
-            return @($resolved)
-        }
+            if (-not $directory)
+            {
+                continue
+            }
 
-        if ([System.IO.Path]::GetFileName($resolved) -ne 'ReClass.NET.exe')
+            if (-not [System.IO.File]::Exists([System.IO.Path]::Combine($directory, 'ReClass.NET.exe')))
+            {
+                continue
+            }
+
+            if ($directory -match '\\obj\\' -or $directory -match '\\\.vs\\')
+            {
+                continue
+            }
+
+            $full = [System.IO.Path]::GetFullPath($directory).TrimEnd('\')
+        }
+        catch
         {
-            throw "'$resolved' is not ReClass.NET.exe."
+            continue
         }
 
-        return @([System.IO.Path]::GetDirectoryName($resolved))
+
+        if (-not ($result -contains $full))
+        {
+            $result.Add($full)
+        }
     }
 
+    return @($result)
+}
+
+function Select-InstallTarget
+{
+    param(
+        [Parameter(Mandatory)][string[]]$Found,
+        [switch]$NonInteractive
+    )
+
+    if ($Found.Count -le 1)
+    {
+        return @($Found)
+    }
+
+    if ($NonInteractive -or -not [Environment]::UserInteractive)
+    {
+        return @($Found)
+    }
+
+    Write-Host ''
+    Write-Host "    $($Found.Count) ReClass.NET installations were found:"
+    Write-Host ''
+
+    for ($index = 0; $index -lt $Found.Count; $index++)
+    {
+        Write-Host ("      [{0}] {1}" -f ($index + 1), $Found[$index])
+    }
+
+    Write-Host ''
+    Write-Host '    Enter the numbers to install into, or press enter for all of them.'
+    Write-Host ''
+
+    $answer = (Read-Host '    choice').Trim()
+
+    if (-not $answer)
+    {
+        return @($Found)
+    }
+
+    $chosen = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($part in ($answer -split '[,\s]+'))
+    {
+        $number = 0
+        if ([int]::TryParse($part, [ref]$number) -and $number -ge 1 -and $number -le $Found.Count)
+        {
+            $chosen.Add($Found[$number - 1])
+        }
+    }
+
+    if ($chosen.Count -eq 0)
+    {
+        throw "'$answer' did not name any of the listed installations."
+    }
+
+    return @($chosen | Select-Object -Unique)
+}
+
+function Get-RunningReClassPath
+{
     $found = [System.Collections.Generic.List[string]]::new()
 
     foreach ($process in @(Get-Process -Name 'ReClass.NET' -ErrorAction SilentlyContinue))
     {
         try
         {
-            $found.Add([System.IO.Path]::GetDirectoryName($process.MainModule.FileName))
+            $found.Add($process.MainModule.FileName)
         }
         catch
         {
@@ -640,6 +729,50 @@ function Resolve-ReClassNetDirectory
         }
     }
 
+    return @($found)
+}
+
+function Get-ShellHistoryReClassPath
+{
+    param([string[]]$Names)
+
+    if (-not $PSBoundParameters.ContainsKey('Names'))
+    {
+        $key = 'HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache'
+
+        if (-not (Test-Path -LiteralPath $key))
+        {
+            return @()
+        }
+
+        $Names = (Get-Item -LiteralPath $key).GetValueNames()
+    }
+
+    $found = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($name in $Names)
+    {
+        $path = $name
+
+        foreach ($suffix in @('.FriendlyAppName', '.ApplicationCompany'))
+        {
+            if ($path.EndsWith($suffix, [StringComparison]::OrdinalIgnoreCase))
+            {
+                $path = $path.Substring(0, $path.Length - $suffix.Length)
+            }
+        }
+
+        if ($path.EndsWith('\ReClass.NET.exe', [StringComparison]::OrdinalIgnoreCase))
+        {
+            $found.Add($path)
+        }
+    }
+
+    return @($found)
+}
+
+function Get-ConventionalReClassPath
+{
     $roots = @(
         (Join-Path $env:LOCALAPPDATA 'Programs')
         $env:ProgramFiles
@@ -647,20 +780,131 @@ function Resolve-ReClassNetDirectory
         (Join-Path $env:USERPROFILE 'Desktop')
         (Join-Path $env:USERPROFILE 'Downloads')
         (Join-Path $env:USERPROFILE 'Documents')
+        (Join-Path $env:USERPROFILE 'Tools')
+        (Join-Path $env:USERPROFILE 'source\repos')
         'C:\Tools'
         'C:\ReClass.NET'
     ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
 
+    $found = [System.Collections.Generic.List[string]]::new()
+
     foreach ($root in $roots)
     {
-        $hits = Get-ChildItem -LiteralPath $root -Filter 'ReClass.NET.exe' -Recurse -Depth 3 -File -ErrorAction SilentlyContinue
-        foreach ($hit in $hits)
+        foreach ($hit in @(Get-ChildItem -LiteralPath $root -Filter 'ReClass.NET.exe' -Recurse -Depth 3 -File -ErrorAction SilentlyContinue))
         {
-            $found.Add($hit.DirectoryName)
+            $found.Add($hit.FullName)
         }
     }
 
-    return @($found | Select-Object -Unique)
+    return @($found)
+}
+
+function Find-ReClassPathOnAllDrives
+{
+    param([int]$Depth = 5)
+
+    $skip = @('Windows', 'ProgramData', '$Recycle.Bin', 'System Volume Information', 'node_modules', 'AppData')
+    $found = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($drive in @(Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue))
+    {
+        if (-not $drive.Root -or $drive.Root.Length -gt 3)
+        {
+            continue
+        }
+
+        Write-Detail "searching $($drive.Root)"
+
+        foreach ($top in @(Get-ChildItem -LiteralPath $drive.Root -Directory -ErrorAction SilentlyContinue))
+        {
+            if ($skip -contains $top.Name)
+            {
+                continue
+            }
+
+            foreach ($hit in @(Get-ChildItem -LiteralPath $top.FullName -Filter 'ReClass.NET.exe' -Recurse -Depth $Depth -File -ErrorAction SilentlyContinue))
+            {
+                $found.Add($hit.FullName)
+            }
+        }
+
+        foreach ($hit in @(Get-ChildItem -LiteralPath $drive.Root -Filter 'ReClass.NET.exe' -File -ErrorAction SilentlyContinue))
+        {
+            $found.Add($hit.FullName)
+        }
+    }
+
+    return @($found)
+}
+
+function Resolve-ReClassNetDirectory
+{
+    param(
+        [string]$Hint,
+        [string[]]$Remembered,
+        [switch]$Search,
+        [switch]$NonInteractive
+    )
+
+    if ($Hint)
+    {
+        $resolved = (Resolve-Path -LiteralPath $Hint -ErrorAction Stop).Path
+        $item = Get-Item -LiteralPath $resolved
+
+        if (-not $item.PSIsContainer -and [System.IO.Path]::GetFileName($resolved) -ne 'ReClass.NET.exe')
+        {
+            throw "'$resolved' is not ReClass.NET.exe."
+        }
+
+        $selected = @(Select-ReClassDirectory -Candidates @($resolved))
+
+        if ($selected.Count -eq 0)
+        {
+            throw "'$resolved' does not contain ReClass.NET.exe."
+        }
+
+        return $selected
+    }
+
+    $candidates = @(Get-RunningReClassPath) +
+        @($Remembered) +
+        @(Get-ShellHistoryReClassPath) +
+        @(Get-ConventionalReClassPath)
+
+    if ($Search)
+    {
+        Write-Step 'Searching every fixed drive'
+
+        $candidates += @(Find-ReClassPathOnAllDrives)
+    }
+
+    $found = @(Select-ReClassDirectory -Candidates $candidates)
+
+    if ($found.Count -gt 0)
+    {
+        return $found
+    }
+
+    if (-not $NonInteractive -and [Environment]::UserInteractive)
+    {
+        Write-Host ''
+        Write-Warn 'ReClass.NET was not found in any of the usual places.'
+        Write-Host '    Enter the folder holding ReClass.NET.exe, or press enter to search every drive.'
+        Write-Host ''
+
+        $answer = (Read-Host '    path').Trim('"', ' ')
+
+        if ($answer)
+        {
+            return Resolve-ReClassNetDirectory -Hint $answer
+        }
+
+        Write-Step 'Searching every fixed drive'
+
+        return @(Select-ReClassDirectory -Candidates (Find-ReClassPathOnAllDrives))
+    }
+
+    return @()
 }
 
 function Get-ReleaseAsset
@@ -768,7 +1012,8 @@ function Write-ServerSettings
     param(
         [Parameter(Mandatory)][string]$Path,
         [int]$Port = 0,
-        [AllowNull()][System.Nullable[bool]]$AllowMutations = $null
+        [AllowNull()][System.Nullable[bool]]$AllowMutations = $null,
+        [string[]]$ReClassPaths
     )
 
     $settings = [ordered]@{
@@ -776,6 +1021,7 @@ function Write-ServerSettings
         allowMutations = $true
         port           = $script:DefaultPort
         token          = ''
+        reclassPaths   = @()
     }
 
     $created = $true
@@ -785,7 +1031,7 @@ function Write-ServerSettings
         $created = $false
         $existing = Read-JsonFile -Path $Path
 
-        foreach ($key in @('enabled', 'allowMutations', 'port', 'token'))
+        foreach ($key in @('enabled', 'allowMutations', 'port', 'token', 'reclassPaths'))
         {
             if ($existing.Contains($key) -and $null -ne $existing[$key])
             {
@@ -809,6 +1055,11 @@ function Write-ServerSettings
         $settings['allowMutations'] = [bool]$AllowMutations
     }
 
+    if ($ReClassPaths)
+    {
+        $settings['reclassPaths'] = @($ReClassPaths)
+    }
+
     $settings['enabled'] = $true
 
     Save-TextAtomic -Path $Path -Content (ConvertTo-JsonText $settings)
@@ -818,6 +1069,7 @@ function Write-ServerSettings
         Token          = [string]$settings['token']
         Port           = [int]$settings['port']
         AllowMutations = [bool]$settings['allowMutations']
+        ReClassPaths   = @($settings['reclassPaths'])
     }
 }
 
@@ -993,7 +1245,22 @@ function Invoke-Install
 
     Write-Step 'Locating ReClass.NET'
 
-    $directories = @(Resolve-ReClassNetDirectory -Hint $ReClassPath)
+    $remembered = @()
+    if (Test-Path -LiteralPath (Get-ServerSettingsPath))
+    {
+        $stored = Read-JsonFile -Path (Get-ServerSettingsPath)
+        if ($stored.Contains('reclassPaths'))
+        {
+            $remembered = @($stored['reclassPaths'])
+        }
+    }
+
+    $directories = @(Resolve-ReClassNetDirectory -Hint $ReClassPath -Remembered $remembered -Search:$Search -NonInteractive:$NonInteractive)
+
+    if (-not $ReClassPath -and -not $Uninstall)
+    {
+        $directories = @(Select-InstallTarget -Found $directories -NonInteractive:$NonInteractive)
+    }
 
     if ($directories.Count -eq 0)
     {
@@ -1001,7 +1268,10 @@ function Invoke-Install
 No ReClass.NET installation was found.
 
 Pass the folder holding ReClass.NET.exe explicitly, for example:
-  -ReClassPath 'C:\Tools\ReClass.NET\x64'
+  -ReClassPath 'D:\re\ReClass.NET\x64'
+
+Or let the installer look for it on every drive:
+  -Search
 
 Get ReClass.NET from https://github.com/ReClassNET/ReClass.NET/releases
 '@
@@ -1075,7 +1345,7 @@ Get ReClass.NET from https://github.com/ReClassNET/ReClass.NET/releases
             $allowMutations = $false
         }
 
-        $settings = Write-ServerSettings -Path (Get-ServerSettingsPath) -Port $Port -AllowMutations $allowMutations
+        $settings = Write-ServerSettings -Path (Get-ServerSettingsPath) -Port $Port -AllowMutations $allowMutations -ReClassPaths $directories
         $url = "http://127.0.0.1:$($settings.Port)/mcp"
 
         if ($settings.Created)

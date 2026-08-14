@@ -28,6 +28,13 @@ reused, and only its fingerprint is printed.
 It is idempotent. Re-run it after an upgrade, or twice by accident: same token, same port, one
 entry per client config.
 
+ReClass.NET is looked for in this order: an explicit `-ReClassPath`, a running instance, paths
+remembered from a previous install, the Windows shell history that records the full path of
+anything launched from Explorer, and finally a scan of the usual folders. If it lives somewhere
+unusual, `-Search` looks on every fixed drive, and an interactive run offers that by itself. The
+resolved paths are written to `server.json`, so an unconventional location only has to be found
+once. See [docs/install.md](docs/install.md) for the full order.
+
 Close ReClass.NET first. The plugin DLL is locked while the host runs, so the copy fails on a
 live instance. The installer warns rather than guessing, and `-Force` closes the instances for
 you.

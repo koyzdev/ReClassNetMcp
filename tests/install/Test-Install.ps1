@@ -641,6 +641,104 @@ Test-Case 'the wrong exe name is rejected' {
 }
 
 Write-Host ''
+Write-Host 'discovery beyond the usual places'
+
+Test-Case 'shell history names are turned into exe paths' {
+    $names = @(
+        'F:\\re\\tools\\reclass\\x64\\ReClass.NET.exe.FriendlyAppName'
+        'D:\\stuff\\ReClass.NET.exe.ApplicationCompany'
+        'C:\\Windows\\notepad.exe.FriendlyAppName'
+        'C:\\somewhere\\ReClass.NET_Launcher.exe.FriendlyAppName'
+    )
+
+    $paths = @(Get-ShellHistoryReClassPath -Names $names)
+
+    Assert-Equal 2 $paths.Count 'only the two ReClass.NET.exe entries match'
+    Assert-True ($paths -contains 'F:\\re\\tools\\reclass\\x64\\ReClass.NET.exe') 'suffix stripped'
+    Assert-True ($paths -contains 'D:\\stuff\\ReClass.NET.exe') 'company suffix stripped too'
+    Assert-True (-not ($paths -contains 'C:\\somewhere\\ReClass.NET_Launcher.exe')) 'the launcher is not the host'
+}
+
+Test-Case 'candidate selection validates, normalises and de-duplicates' {
+    $sandbox = New-Sandbox
+    try
+    {
+        $good = Join-Path $sandbox 'good'
+        $empty = Join-Path $sandbox 'empty'
+        New-Item -ItemType Directory -Force -Path $good, $empty | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $good 'ReClass.NET.exe'), 'stub')
+
+        $selected = @(Select-ReClassDirectory -Candidates @(
+            (Join-Path $good 'ReClass.NET.exe')
+            $good
+            "$good\\"
+            $empty
+            (Join-Path $sandbox 'missing')
+            $null
+            ''))
+
+        Assert-Equal 1 $selected.Count 'the same directory is only reported once'
+        Assert-Equal (Get-Item -LiteralPath $good).FullName $selected[0]
+    }
+    finally
+    {
+        Remove-Item -LiteralPath $sandbox -Recurse -Force
+    }
+}
+
+Test-Case 'a remembered path from a previous install is preferred over searching' {
+    $sandbox = New-Sandbox
+    try
+    {
+        $odd = Join-Path $sandbox 'z_unconventional'
+        New-Item -ItemType Directory -Force -Path $odd | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $odd 'ReClass.NET.exe'), 'stub')
+
+        $found = @(Resolve-ReClassNetDirectory -Remembered @($odd) -NonInteractive)
+
+        Assert-True ($found -contains (Get-Item -LiteralPath $odd).FullName) 'the remembered directory is returned'
+    }
+    finally
+    {
+        Remove-Item -LiteralPath $sandbox -Recurse -Force
+    }
+}
+
+Test-Case 'a stale remembered path is dropped instead of failing' {
+    $found = @(Resolve-ReClassNetDirectory -Remembered @('Q:\\gone\\forever') -NonInteractive)
+
+    Assert-True ($found -notcontains 'Q:\\gone\\forever') 'a path that no longer exists is not returned'
+}
+
+Test-Case 'non interactive discovery with nothing found returns empty rather than prompting' {
+    $found = @(Resolve-ReClassNetDirectory -Remembered @('Q:\\nope') -NonInteractive)
+
+    Assert-Equal 0 @($found | Where-Object { $_ -like 'Q:*' }).Count
+}
+
+Test-Case 'resolved paths are remembered for the next run' {
+    $sandbox = New-Sandbox
+    try
+    {
+        $path = Join-Path $sandbox 'server.json'
+        $odd = Join-Path $sandbox 'somewhere_odd'
+        New-Item -ItemType Directory -Force -Path $odd | Out-Null
+
+        $result = Write-ServerSettings -Path $path -ReClassPaths @($odd)
+
+        Assert-Equal 1 $result.ReClassPaths.Count
+        Assert-Equal $odd $result.ReClassPaths[0]
+
+        $again = Write-ServerSettings -Path $path
+        Assert-Equal $odd $again.ReClassPaths[0] 'omitting the parameter keeps the stored paths'
+    }
+    finally
+    {
+        Remove-Item -LiteralPath $sandbox -Recurse -Force
+    }
+}
+
+Write-Host ''
 Write-Host 'payload'
 
 Test-Case 'installing the payload creates the plugin subfolder' {
