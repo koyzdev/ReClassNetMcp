@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net472</TargetFramework>
+		<AssemblyName>ReClassNetMcp.Tests</AssemblyName>
+		<RootNamespace>ReClassNetMcp.Tests</RootNamespace>
+		<OutputType>Library</OutputType>
+		<PlatformTarget>x64</PlatformTarget>
+		<LangVersion>latest</LangVersion>
+		<IsPackable>false</IsPackable>
+		<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+		<GenerateDocumentationFile>false</GenerateDocumentationFile>
+		<AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+		<GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
+	</PropertyGroup>
+
+	<PropertyGroup>
+		<ReClassNetAssembly Condition="'$(ReClassNetAssembly)' == ''">$(MSBuildThisFileDirectory)..\..\external\ReClass.NET\bin\Release\x64\ReClass.NET.exe</ReClassNetAssembly>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.9.0" />
+		<PackageReference Include="xunit" Version="2.4.1" />
+		<PackageReference Include="xunit.runner.visualstudio" Version="2.4.1">
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+		</PackageReference>
+		<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Reference Include="ReClass.NET">
+			<HintPath>$(ReClassNetAssembly)</HintPath>
+			<Private>false</Private>
+		</Reference>
+		<Reference Include="System.Windows.Forms" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\..\src\ReClassNetMcp\ReClassNetMcp.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Include="$(ReClassNetAssembly)" Condition="Exists('$(ReClassNetAssembly)')">
+			<Link>ReClass.NET.exe</Link>
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<Visible>false</Visible>
+		</None>
+	</ItemGroup>
+
+	<Target Name="VerifyReClassNetAssembly" BeforeTargets="ResolveAssemblyReferences">
+		<Error Condition="!Exists('$(ReClassNetAssembly)')" Text="ReClass.NET.exe not found at '$(ReClassNetAssembly)'. Run build.ps1 -Test, or pass /p:ReClassNetAssembly=&lt;path to ReClass.NET.exe&gt;." />
+	</Target>
+
+</Project>
