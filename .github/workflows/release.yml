@@ -1,0 +1,103 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to publish, without a leading v
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          $raw = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { '${{ github.event.inputs.version }}' }
+          $value = $raw -replace '^v', ''
+          if ($value -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$')
+          {
+              throw "'$raw' is not a valid version"
+          }
+          $prerelease = if ($value -like '*-*') { 'true' } else { 'false' }
+          "value=$value" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "prerelease=$prerelease" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "tag=v$value" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Style guard
+        run: pwsh -File scripts/Test-Style.ps1
+
+      - name: Build host, plugin and run unit tests
+        run: pwsh -File build.ps1 -Configuration Release -Platform both -Test
+
+      - name: Installer tests
+        if: hashFiles('tests/install/Test-Install.ps1') != ''
+        run: pwsh -File tests/install/Test-Install.ps1
+
+      - name: Package
+        run: pwsh -File pack.ps1 -Version ${{ steps.version.outputs.value }} -Repo ${{ github.repository }}
+
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = '${{ steps.version.outputs.tag }}'
+          $repo = '${{ github.repository }}'
+          $notes = @"
+          ## Install
+
+          ``````powershell
+          irm https://github.com/$repo/releases/latest/download/install.ps1 | iex
+          ``````
+
+          With arguments, which ``irm | iex`` cannot pass:
+
+          ``````powershell
+          & ([scriptblock]::Create((irm https://github.com/$repo/releases/latest/download/install.ps1))) -Clients all
+          ``````
+
+          The installer finds every ReClass.NET installation, copies the plugin into ``<dir>\Plugins\ReClassNetMcp\``, provisions a bearer token without overwriting an existing one, registers the server with the MCP clients it detects, and installs the ``reclass`` skill. Close ReClass.NET first; the plugin DLL is locked while it runs.
+          "@
+
+          $arguments = @('release', 'create', $tag, '--title', "ReClassNetMcp ${{ steps.version.outputs.value }}", '--generate-notes', '--notes', $notes)
+
+          if ('${{ steps.version.outputs.prerelease }}' -eq 'true')
+          {
+              $arguments += '--prerelease'
+          }
+
+          $arguments += (Get-ChildItem dist -File | ForEach-Object { $_.FullName })
+
+          if (gh release view $tag 2>$null)
+          {
+              gh release delete $tag --yes --cleanup-tag:$false
+          }
+
+          & gh @arguments
+
+          if ($LASTEXITCODE -ne 0)
+          {
+              throw 'gh release create failed'
+          }
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ReClassNetMcp-${{ steps.version.outputs.value }}
+          path: dist/

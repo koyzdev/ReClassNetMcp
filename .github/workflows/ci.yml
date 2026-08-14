@@ -1,0 +1,38 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: Style guard
+        run: pwsh -File scripts/Test-Style.ps1
+
+      - name: Build host, plugin and run unit tests
+        run: pwsh -File build.ps1 -Configuration Release -Platform both -Test
+
+      - name: Installer tests
+        if: hashFiles('tests/install/Test-Install.ps1') != ''
+        run: pwsh -File tests/install/Test-Install.ps1
+
+      - name: Package
+        run: pwsh -File pack.ps1 -Version 0.0.0-ci.${{ github.run_number }} -Repo ${{ github.repository }}
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ReClassNetMcp-ci
+          path: dist/
+          retention-days: 14
