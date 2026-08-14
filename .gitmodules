@@ -1,0 +1,4 @@
+[submodule "external/ReClass.NET"]
+	path = external/ReClass.NET
+	url = https://github.com/ReClassNET/ReClass.NET
+	branch = master
