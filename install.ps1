@@ -657,6 +657,56 @@ function Select-ReClassDirectory
     return @($result)
 }
 
+function Test-CanPrompt
+{
+    param([switch]$NonInteractive)
+
+    if ($NonInteractive)
+    {
+        return $false
+    }
+
+    if (-not [Environment]::UserInteractive)
+    {
+        return $false
+    }
+
+    try
+    {
+        if ([Console]::IsInputRedirected)
+        {
+            return $false
+        }
+    }
+    catch
+    {
+        return $false
+    }
+
+    return $true
+}
+
+function Read-Answer
+{
+    param([Parameter(Mandatory)][string]$Prompt)
+
+    try
+    {
+        $answer = Read-Host $Prompt
+    }
+    catch
+    {
+        return ''
+    }
+
+    if ($null -eq $answer)
+    {
+        return ''
+    }
+
+    return $answer
+}
+
 function Select-InstallTarget
 {
     param(
@@ -669,8 +719,10 @@ function Select-InstallTarget
         return @($Found)
     }
 
-    if ($NonInteractive -or -not [Environment]::UserInteractive)
+    if (-not (Test-CanPrompt -NonInteractive:$NonInteractive))
     {
+        Write-Detail 'installing into all of them, pass -ReClassPath to pick one'
+
         return @($Found)
     }
 
@@ -687,7 +739,7 @@ function Select-InstallTarget
     Write-Host '    Enter the numbers to install into, or press enter for all of them.'
     Write-Host ''
 
-    $answer = (Read-Host '    choice').Trim()
+    $answer = (Read-Answer '    choice').Trim()
 
     if (-not $answer)
     {
@@ -885,14 +937,14 @@ function Resolve-ReClassNetDirectory
         return $found
     }
 
-    if (-not $NonInteractive -and [Environment]::UserInteractive)
+    if (Test-CanPrompt -NonInteractive:$NonInteractive)
     {
         Write-Host ''
         Write-Warn 'ReClass.NET was not found in any of the usual places.'
         Write-Host '    Enter the folder holding ReClass.NET.exe, or press enter to search every drive.'
         Write-Host ''
 
-        $answer = (Read-Host '    path').Trim('"', ' ')
+        $answer = (Read-Answer '    path').Trim('"', ' ')
 
         if ($answer)
         {

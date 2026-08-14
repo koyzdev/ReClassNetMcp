@@ -738,6 +738,37 @@ Test-Case 'resolved paths are remembered for the next run' {
     }
 }
 
+Test-Case 'prompting is refused when input is redirected or non interactive' {
+    Assert-True (-not (Test-CanPrompt -NonInteractive)) 'the switch always wins'
+    Assert-True (-not (Test-CanPrompt)) 'a piped or redirected host cannot prompt'
+}
+
+Test-Case 'a missing answer is an empty string rather than a null crash' {
+    $answer = Read-Answer '    ignored'
+
+    Assert-True ($null -ne $answer) 'never null'
+    Assert-Equal '' $answer
+    Assert-Equal 0 $answer.Trim().Length 'safe to call Trim on'
+}
+
+Test-Case 'multiple installs fall back to all of them when prompting is impossible' {
+    $sandbox = New-Sandbox
+    try
+    {
+        $one = Join-Path $sandbox 'one'
+        $two = Join-Path $sandbox 'two'
+        New-Item -ItemType Directory -Force -Path $one, $two | Out-Null
+
+        $chosen = @(Select-InstallTarget -Found @($one, $two) -NonInteractive)
+
+        Assert-Equal 2 $chosen.Count
+    }
+    finally
+    {
+        Remove-Item -LiteralPath $sandbox -Recurse -Force
+    }
+}
+
 Write-Host ''
 Write-Host 'payload'
 
