@@ -9,8 +9,10 @@ rights.
 irm https://github.com/koyzdev/ReClassNetMcp/releases/latest/download/install.ps1 | iex
 ```
 
-`irm | iex` streams the script straight into the interpreter, which leaves nowhere to put
-arguments. When you need any, materialise the script as a scriptblock and call it:
+That form is fully interactive. `iex` takes the script text off the pipeline, while the questions
+the installer asks go through the host, so it can still prompt you for a path or ask which
+installation to patch. The one thing it cannot do is carry arguments, because there is nowhere to
+put them. When you need any, materialise the script as a scriptblock and call it:
 
 ```powershell
 & ([scriptblock]::Create((irm https://github.com/koyzdev/ReClassNetMcp/releases/latest/download/install.ps1))) -Clients all -ProjectDirectory 'F:\Repos\game'
@@ -29,7 +31,7 @@ irm https://github.com/koyzdev/ReClassNetMcp/releases/latest/download/install.ps
 | --- | --- | --- | --- |
 | `-Repo` | `string` | `koyzdev/ReClassNetMcp` | The GitHub repository the release is read from. The copy attached to a release carries the repository that produced it, already stamped in. |
 | `-Version` | `string` | `latest` | Which release to install. `latest` resolves `/releases/latest`; anything else is a tag, and a missing `v` prefix is added (`0.9.1` becomes `v0.9.1`). |
-| `-ReClassPath` | `string` | none (auto-discovers) | The folder holding `ReClass.NET.exe`, or the path of the exe itself. Omitted, every installation found is patched: the module path of a running `ReClass.NET` process first, then a depth-3 scan of `%LOCALAPPDATA%\Programs`, both `Program Files` trees, `Desktop`, `Downloads`, `Documents`, `C:\Tools` and `C:\ReClass.NET`. |
+| `-ReClassPath` | `string` | none (auto-discovers) | The folder holding `ReClass.NET.exe`, or the path of the exe itself. Omitted, discovery runs through six sources and every installation it finds is patched. The order is listed under [Where ReClass.NET is looked for](#where-reclassnet-is-looked-for). |
 | `-Clients` | `string[]` | `auto` | Which client configurations to write. Accepts `auto`, `all`, `none` and the individual ids `omp`, `omp-project`, `claude`, `cursor`, `vscode`, `codex`; it is an array, so `-Clients omp,codex` is valid. |
 | `-ProjectDirectory` | `string` | none | The project root used by the project-scoped targets `omp-project` and `vscode`. There is no default: naming either id without this parameter is an error, and `auto`/`all` simply leave them out. |
 | `-Port` | `int` | `0` | `0` means keep whatever port is already in `server.json`, or `15850` when there is no file yet. Only a value greater than zero overwrites the stored port. |
@@ -227,4 +229,4 @@ Because the resolved paths are written back to `server.json`, an unconventional 
 | The client cannot reach the server at all | Either the server is switched off (`MCP Server -> Enabled` is unchecked), or it is on a different port because `15850` was taken | Check the menu bar caption, then `%LOCALAPPDATA%\ReClass.NET\mcp\instance_<pid>.json` for the real URL, and re-run the installer with `-Port` if you want to pin it. |
 | Tools are missing from `tools/list` | `MCP Server -> Allow mutations` is off (or the install used `-ReadOnly`), which hides every destructive tool by design | Enable `Allow mutations` in the menu, or set `"allowMutations": true` in `server.json` and restart the server. |
 | `The configuration file '…' is not valid JSON` | An existing client config is malformed; the installer refuses to guess and leaves it untouched | Fix or delete that file, then re-run. |
-| `No ReClass.NET installation was found` | The discovery scan reaches three levels below the roots it knows, and your copy is elsewhere | Pass `-ReClassPath` with the folder holding `ReClass.NET.exe`. |
+| `No ReClass.NET installation was found` | None of the six discovery sources reached it, usually because it sits outside the scanned roots and has never been launched from Explorer | Pass `-ReClassPath` with the folder holding `ReClass.NET.exe`, or run once with `-Search`. Either way the path is remembered for next time. |

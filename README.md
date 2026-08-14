@@ -11,8 +11,9 @@ node, and generate C++ or C# code.
 irm https://github.com/koyzdev/ReClassNetMcp/releases/latest/download/install.ps1 | iex
 ```
 
-That is the whole install. `irm | iex` pipes the script straight into the interpreter, which
-leaves nowhere to put arguments, so pass them through a scriptblock instead:
+That is the whole install, and it stays interactive: it can still ask which installation to patch,
+or ask for a path when it cannot find one. What it cannot do is carry arguments, because a piped
+script has nowhere to put them, so pass those through a scriptblock instead:
 
 ```powershell
 & ([scriptblock]::Create((irm https://github.com/koyzdev/ReClassNetMcp/releases/latest/download/install.ps1))) -Clients all -ReClassPath 'C:\Tools\ReClass.NET\x64'
